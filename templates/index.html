@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Nhận diện cảm xúc</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", sans-serif;
+        background: linear-gradient(to bottom right, #e0f7fa, #ffffff);
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 10px;
+      }
+
+      h2 {
+        color: #00796b;
+        font-size: 1.3rem;
+        margin-bottom: 5px;
+      }
+
+      #cameraWrapper {
+        position: relative;
+        width: 360px;
+        height: auto;
+        max-width: 90vw;
+      }
+
+      img,
+      .camera-placeholder {
+        border: 4px solid #4dd0e1;
+        border-radius: 10px;
+        width: 100%;
+        height: auto;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+      }
+
+      .camera-placeholder {
+        display: none;
+        background-color: #fff8e1;
+        text-align: center;
+        padding: 50px 20px;
+        font-size: 1rem;
+        color: #ff6f00;
+      }
+
+      h1#emotion-icon {
+        font-size: 2.5rem;
+        margin: 10px 0 5px;
+      }
+
+      p#emotion-text {
+        font-size: 1rem;
+        text-align: center;
+        max-width: 80%;
+        color: #333;
+      }
+
+      .alert-box {
+        position: fixed;
+        top: 15%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #fff3cd;
+        border: 2px solid #ff9800;
+        padding: 15px;
+        border-radius: 10px;
+        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+        display: none;
+        z-index: 999;
+      }
+
+      .alert-box button {
+        background-color: #ff9800;
+        color: white;
+        padding: 6px 12px;
+        border: none;
+        border-radius: 5px;
+        font-weight: bold;
+        cursor: pointer;
+        margin-top: 8px;
+      }
+
+      .controls {
+        display: flex;
+        gap: 8px;
+        margin-top: 10px;
+      }
+
+      .controls button {
+        padding: 6px 12px;
+        font-size: 0.9rem;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: bold;
+      }
+
+      #startButton {
+        background-color: #4caf50;
+        color: white;
+      }
+      #pauseButton {
+        background-color: #2196f3;
+        color: white;
+      }
+      #stopButton {
+        background-color: #f44336;
+        color: white;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>📸 Camera cảm xúc</h2>
+    <div id="cameraWrapper">
+      <img
+        id="cameraStream"
+        src="{{ url_for('video_feed') }}"
+        alt="Video webcam"
+      />
+      <div id="cameraPlaceholder" class="camera-placeholder">
+        Quá trình thu thập dữ liệu của bạn đã kết thúc, vui lòng nhấn bắt đầu để
+        thu thập dữ liệu!
+      </div>
+    </div>
+    <h1 id="emotion-icon">🤔</h1>
+    <p id="emotion-text">Đang phân tích khuôn mặt...</p>
+
+    <div class="alert-box" id="alertBox">
+      <p>⚠️ Bạn có vẻ đang buồn trong thời gian dài.<br />Bạn có ổn không?</p>
+      <button onclick="resetAlert()">Tôi ổn rồi</button>
+    </div>
+
+    <audio
+      id="alertSound"
+      src="{{ url_for('static', filename='alarm.mp3') }}"
+    ></audio>
+
+    <div class="controls">
+      <button id="startButton" onclick="startApp()">Bắt đầu</button>
+      <button id="pauseButton" onclick="togglePause()">Tạm dừng</button>
+      <button id="stopButton" onclick="stopApp()">Dừng</button>
+    </div>
+
+    <script>
+      let hasPlayedSound = false;
+      let intervalId = null;
+      let isPaused = false;
+      let isStopped = false;
+      let sessionIndex = 1;
+      let isStarted = false;
+      let originalStreamSrc = "{{ url_for('video_feed') }}";
+
+      function resetAlert() {
+        fetch("/reset_alert", { method: "POST" }).then(() => {
+          document.getElementById("alertBox").style.display = "none";
+          const sound = document.getElementById("alertSound");
+          if (sound) {
+            sound.pause();
+            sound.currentTime = 0;
+          }
+          hasPlayedSound = false;
+        });
+      }
+
+      function togglePause() {
+        if (!isStarted || isStopped) return;
+        isPaused = !isPaused;
+        document.getElementById("pauseButton").innerText = isPaused
+          ? "Tiếp tục"
+          : "Tạm dừng";
+        document.getElementById("startButton").innerText = isPaused
+          ? "Bắt đầu"
+          : "Đã bắt đầu";
+
+        const cam = document.getElementById("cameraStream");
+        const placeholder = document.getElementById("cameraPlaceholder");
+        if (isPaused) {
+          clearInterval(intervalId);
+          intervalId = null;
+        } else {
+          startPolling();
+          cam.src = originalStreamSrc;
+        }
+      }
+
+      function startApp() {
+        if (isStopped) {
+          sessionIndex++;
+          isStopped = false;
+        }
+        if (intervalId) return;
+
+        fetch(`/start_session?index=${sessionIndex}`);
+        isPaused = false;
+        isStarted = true;
+
+        document.getElementById("startButton").innerText = "Đã bắt đầu";
+        document.getElementById("pauseButton").innerText = "Tạm dừng";
+
+        const cam = document.getElementById("cameraStream");
+        cam.style.display = "block";
+        document.getElementById("cameraPlaceholder").style.display = "none";
+        cam.src = originalStreamSrc;
+
+        const sound = document.getElementById("alertSound");
+        sound.play().then(() => {
+          sound.pause();
+          sound.currentTime = 0;
+        });
+
+        startPolling();
+      }
+
+      function startPolling() {
+        intervalId = setInterval(() => {
+          if (isPaused || isStopped) return;
+          fetch("/emotion")
+            .then((res) => res.json())
+            .then((data) => {
+              document.getElementById("emotion-icon").innerText = data.label;
+              document.getElementById("emotion-text").innerText =
+                data.description;
+
+              if (data.alert) {
+                document.getElementById("alertBox").style.display = "block";
+                const sound = document.getElementById("alertSound");
+                if (!hasPlayedSound) {
+                  sound.currentTime = 0;
+                  sound.play();
+                  hasPlayedSound = true;
+                }
+              }
+            });
+        }, 1000);
+      }
+
+      function stopApp() {
+        isStopped = true;
+        isPaused = false;
+        isStarted = false;
+        clearInterval(intervalId);
+        intervalId = null;
+
+        const sound = document.getElementById("alertSound");
+        sound.pause();
+        sound.currentTime = 0;
+
+        document.getElementById("emotion-text").innerText =
+          "Đã dừng thu thập dữ liệu.";
+        document.getElementById("cameraStream").style.display = "none";
+        document.getElementById("cameraPlaceholder").style.display = "block";
+
+        document.getElementById("startButton").innerText = "Bắt đầu";
+        document.getElementById("pauseButton").innerText = "Tạm dừng";
+      }
+    </script>
+  </body>
+</html>

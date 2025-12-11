@@ -1,0 +1,6 @@
+flask
+opencv-python
+deepface
+tf-keras
+tensorflow==2.10.1
+numpy<2
